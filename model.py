@@ -12,7 +12,7 @@ MAX_LOST_FRAMES = 10
 class Track:
     def __init__(self, tid, bbox):
         self.tid = tid
-        self.bbox = bbox  # [x, y, w, h]
+        self.bbox = bbox 
         self.lost = 0
         self.is_active = True
 
