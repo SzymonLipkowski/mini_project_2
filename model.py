@@ -3,13 +3,13 @@ import numpy as np
 import glob
 import os
 
-THRESHOLD = 45
-MIN_AREA = 2500
+THRESHOLD = 20
+MIN_AREA = 2000
 DISTANCE_THRESH = 150
 MAX_LOST_FRAMES = 20
-IOU_THRESHOLD = 0.3
+IOU_THRESHOLD = 0.8
 USE_IOU_MATCHING = True
-ASPECT_MIN = 1.2
+ASPECT_MIN = 0.8
 ASPECT_MAX = 5.0
 
 class Track:
@@ -57,11 +57,9 @@ def update_background(bg: np.ndarray, frame: np.ndarray):
 def get_foreground(bg: np.ndarray, frame: np.ndarray):
     diff = cv2.absdiff(frame, bg)
     _, fg = cv2.threshold(diff, THRESHOLD, 255, cv2.THRESH_BINARY)
-    fg = cv2.medianBlur(fg, 5)
-    kernel_h = np.ones((3, 11), np.uint8) 
-    fg = cv2.dilate(fg, kernel_h, iterations=1)
-    kernel_v = np.ones((40, 3), np.uint8)
-    fg = cv2.morphologyEx(fg, cv2.MORPH_CLOSE, kernel_v)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    fg = cv2.morphologyEx(fg, cv2.MORPH_OPEN, kernel, iterations=2)
+    fg = cv2.morphologyEx(fg, cv2.MORPH_CLOSE, kernel, iterations=4)
     return fg
 
 def get_detections(fg: np.ndarray):
@@ -206,27 +204,41 @@ def draw(frame: np.ndarray, detections, evaluator: MOTAEvaluator):
     return frame
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
-path_pattern = os.path.join(base_dir,r"evs_mot_public_dataset\evs_mot-test\MOT_01\img1\*.jpg")
+path_pattern = os.path.join(base_dir,r"evs_mot_public_dataset\evs_mot-test\MOT_07\img1\*.jpg")
 image_paths  = sorted(glob.glob(path_pattern))
 print(f"[INFO] Found {len(image_paths)} frames.")
 first = cv2.imread(image_paths[0])
 bg = cv2.cvtColor(first, cv2.COLOR_BGR2GRAY)
 evaluator = MOTAEvaluator()
 
-for frame_idx, path in enumerate(image_paths):
-    frame = cv2.imread(path)
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    bg = update_background(bg, gray)
-    fg = get_foreground(bg, gray)
-    detections = get_detections(fg)
-    update_tracks(detections)
-    stable_tracks = [t for t in tracks.values() if t.age > 10]
-    g_t = len(stable_tracks)
-    evaluator.update(detections, g_t)
-    output = draw(frame.copy(), detections, evaluator)
-    cv2.imshow("MOT Tracker", output)
-    cv2.imshow("Foreground Mask", fg)
-    if cv2.waitKey(50) & 0xFF == 27:
-        break
+output_txt_path = os.path.join(base_dir, "results.txt")
+
+with open(output_txt_path, "w") as f:
+    for frame_idx, path in enumerate(image_paths):
+        frame = cv2.imread(path)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        bg = update_background(bg, gray)
+        fg = get_foreground(bg, gray)
+        detections = get_detections(fg)
+        update_tracks(detections)
+        for tid, t in tracks.items():
+            if t.lost == 0:
+                x, y, w, h = t.bbox
+                line = f"{frame_idx + 1},{tid},{x},{y},{w},{h},1,-1,-1,-1\n"
+                f.write(line)
+        
+        stable_tracks = [t for t in tracks.values() if t.age > 10]
+        g_t = len(stable_tracks)
+        evaluator.update(detections, g_t)
+        
+        output = draw(frame.copy(), detections, evaluator)
+        cv2.imshow("MOT Tracker", output)
+        cv2.imshow("Foreground Mask", fg)
+        
+        if cv2.waitKey(50) & 0xFF == 27:
+            break
+
 cv2.destroyAllWindows()
 evaluator.report()
+print(f"[INFO] Results saved to: {output_txt_path}")
